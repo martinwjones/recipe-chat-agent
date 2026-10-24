@@ -52,9 +52,23 @@ Examples:
 "Who won the election?" -> {"intent": "off_topic", "query": "", "ingredients": []}
 "Hello!" -> {"intent": "greeting", "query": "", "ingredients": []}"""
 
-TOPIC_PROMPT = """Is the user's message about food, drinks, cooking, recipes, ingredients, meals or
-kitchen techniques? Questions about places, people, facts, work or technology are not,
-even if they mention a country or a cuisine. Answer with one word: yes or no."""
+TOPIC_PROMPT = """Decide whether a message belongs in a cooking chatbot. Answer with one word: yes or no.
+
+yes: anything about food, drinks, dishes, recipes, ingredients, substitutions, nutrition,
+cooking or baking techniques, kitchen equipment, meal ideas or food storage.
+no: everything else, such as places, people, history, sport, travel, money, work,
+technology, maths and jokes, even when the message mentions a country or a cuisine.
+
+Examples:
+What's the difference between baking soda and baking powder? -> yes
+How long should I rest a steak? -> yes
+Can I freeze cooked rice? -> yes
+What wine goes with salmon? -> yes
+What's the capital of France? -> no
+Recommend a hotel in Rome -> no
+Who won the world cup? -> no
+Write a Python function -> no
+Tell me a joke -> no"""
 
 ANSWER_PROMPT = """You are Recipe Chat, a friendly cooking assistant. The recipes that best match the
 user's request are listed below, and the app shows them to the user as a list right after
@@ -127,7 +141,8 @@ class RecipeAgent:
         )
         answer = (res.choices[0].message.content or "").strip().lower()
         log.info("on topic: %s", answer)
-        return not answer.startswith("no")
+        # Only an explicit yes counts: a small model sometimes rambles instead of answering.
+        return answer.startswith("yes")
 
     def _route(self, message: str, history: list[dict]) -> dict:
         res = self.llm.chat.completions.create(
