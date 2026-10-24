@@ -62,8 +62,7 @@ your reply. Write a short reply (1 to 3 sentences):
 - For a recipe request, name one or two of the matches and say what makes them appealing
   (flavours, ingredients, style). Don't comment on times, diets or difficulty: the list
   shows those.
-- For a cooking question, answer it briefly from general cooking knowledge, then point to the
-  matches if they are relevant.
+- For a cooking question, answer it briefly, then point to the matches if they are relevant.
 - If the user asks how to make a dish, summarise the best match from its description and say
   the full ingredients and method are on its recipe page.
 Write plain sentences only: no lists, no headings, no links. Never invent recipes.

@@ -53,7 +53,9 @@ class RecipeStore:
             if key in seen:
                 continue
             seen.add(key)
-            dropped = [LABELS[k] for k in criteria if k not in crit]
+            # The ingredient match is best-effort (the feed only has descriptions), so dropping
+            # it alone is not worth telling the user about.
+            dropped = [LABELS[k] for k in criteria if k not in crit and k != "ingredients"]
             relaxed = None if not dropped else ", ".join(dropped[:-1]) + (" and " if len(dropped) > 1 else "") + dropped[-1]
             body: dict = {"query": vector, "limit": limit, "with_payload": True}
             flt = self._filter(crit)
