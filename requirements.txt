@@ -1,5 +1,6 @@
 openai==3.26.1
 httpx==0.28.1  # Qdrant REST calls (search.py)
+mcp==1.30.0    # mcp_server.py; pinned to the 1.x FastMCP API it is written against
 fastapi==0.139.0
 uvicorn[standard]==0.47.0
 pydantic==2.13.4

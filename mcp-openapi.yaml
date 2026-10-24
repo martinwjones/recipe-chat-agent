@@ -1,0 +1,39 @@
+# Interface of the recipe-mcp component (mcp_server.py) for Agent Manager, which builds its
+# gateway routes from this file. MCP streamable HTTP uses one path: POST carries JSON-RPC
+# requests; GET and DELETE are part of the transport (this stateless server answers 405).
+openapi: 3.0.3
+info:
+  title: Recipe Catalog MCP server
+  version: 1.0.0
+  description: >
+    Model Context Protocol endpoint (streamable HTTP, JSON responses) exposing the tools
+    search_recipes, get_recipe and list_filter_values.
+paths:
+  /mcp:
+    post:
+      summary: Send an MCP JSON-RPC message
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: JSON-RPC response
+          content:
+            application/json:
+              schema:
+                type: object
+        "202":
+          description: Notification accepted
+    get:
+      summary: Server-to-client stream (not offered by this stateless server)
+      responses:
+        "405":
+          description: Method not allowed
+    delete:
+      summary: End a session (not used by this stateless server)
+      responses:
+        "405":
+          description: Method not allowed
