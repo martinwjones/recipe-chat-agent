@@ -1,0 +1,8 @@
+openai==3.26.1
+httpx==0.28.1  # Qdrant REST calls (search.py)
+fastapi==0.139.0
+uvicorn[standard]==0.47.0
+pydantic==2.13.4
+
+# AMP's auto-instrumentation cannot use wrapt 2.x (same pin as the AMP samples).
+wrapt==1.17.3
