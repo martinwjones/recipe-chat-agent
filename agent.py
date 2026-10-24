@@ -78,11 +78,13 @@ class RecipeAgent:
     def __init__(self, config: Config) -> None:
         self.config = config
         if config.via_gateway:
-            # The AI Gateway authenticates the agent with an API-Key header, not a bearer token.
+            # The AI Gateway authenticates the agent with an API-Key header. The key is also passed
+            # as api_key because openai>=3 refuses to start with an empty one; the gateway
+            # ignores the resulting bearer header.
             self.llm = OpenAI(
                 base_url=config.llm_base_url,
-                api_key="",
-                default_headers={"API-Key": config.llm_api_key, "Authorization": ""},
+                api_key=config.llm_api_key,
+                default_headers={"API-Key": config.llm_api_key},
             )
         else:
             self.llm = OpenAI(base_url=config.llm_base_url, api_key=config.llm_api_key)
