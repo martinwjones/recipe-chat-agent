@@ -63,7 +63,7 @@ def _user(authorization: str | None) -> tuple[str, str]:
     Requests without a token (local runs) share the "anonymous" user.
     """
     try:
-        payload = (authorization or "").split(" ", 1)[1].split(".")[1]
+        payload = (authorization or "").split()[-1].split(".")[1]
         claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
         user_id = claims["sub"]
         name = claims.get("username") or claims.get("given_name") or claims.get("name") or user_id
@@ -104,12 +104,18 @@ def health() -> dict[str, str]:
 
 
 @app.post("/chat", response_model=ChatResponse)
-def chat(req: ChatRequest, authorization: str | None = Header(default=None)):
+def chat(
+    req: ChatRequest,
+    authorization: str | None = Header(default=None),
+    # The gateway's jwt-auth policy (forwardToken: true) moves the validated token to this
+    # header and removes Authorization.
+    x_forwarded_authorization: str | None = Header(default=None),
+):
     if not req.message.strip():
         raise HTTPException(status_code=400, detail="message must not be empty")
 
     session_id = req.session_id or str(uuid.uuid4())
-    user_id, name = _user(authorization)
+    user_id, name = _user(x_forwarded_authorization or authorization)
 
     over = LIMITER.start(user_id)
     if over is not None:
