@@ -1,20 +1,30 @@
+import base64
+import json
 import logging
 import os
 import threading
 import uuid
 from collections import OrderedDict
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from agent import RecipeAgent
 from config import Config
+from limits import UsageLimiter
+
+try:  # Injected by Agent Manager's auto-instrumentation; absent in local runs.
+    from traceloop.sdk import Traceloop
+except ImportError:
+    Traceloop = None
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("recipe-chat")
 
 AGENT = RecipeAgent(Config.from_env())
+LIMITER = UsageLimiter()
 
 # Demo-grade conversation memory, keyed on the caller-supplied session_id.
 MAX_SESSIONS = 500
@@ -42,6 +52,34 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     response: str
     session_id: str
+    usage: dict
+
+
+def _user(authorization: str | None) -> tuple[str, str]:
+    """(user id, display name) from the ThunderID token the gateway forwards.
+
+    The gateway has already validated the token (signature, issuer, expiry) before the
+    request reaches the agent, so the claims are only decoded here, not re-verified.
+    Requests without a token (local runs) share the "anonymous" user.
+    """
+    try:
+        payload = (authorization or "").split(" ", 1)[1].split(".")[1]
+        claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+        user_id = claims["sub"]
+        name = claims.get("username") or claims.get("given_name") or claims.get("name") or user_id
+        return user_id, name
+    except (IndexError, KeyError, ValueError):
+        return "anonymous", "anonymous"
+
+
+def _tag_trace(user_id: str, name: str, session_id: str) -> None:
+    """Adds the user and session to every span of this request, for per-user views."""
+    if Traceloop is None:
+        return
+    try:
+        Traceloop.set_association_properties({"user_id": user_id, "user_name": name, "session_id": session_id})
+    except Exception:  # noqa: BLE001 - tracing must never break a request
+        log.debug("could not tag trace", exc_info=True)
 
 
 def _history(session_id: str) -> list[dict]:
@@ -66,17 +104,33 @@ def health() -> dict[str, str]:
 
 
 @app.post("/chat", response_model=ChatResponse)
-def chat(req: ChatRequest) -> ChatResponse:
+def chat(req: ChatRequest, authorization: str | None = Header(default=None)):
     if not req.message.strip():
         raise HTTPException(status_code=400, detail="message must not be empty")
 
     session_id = req.session_id or str(uuid.uuid4())
+    user_id, name = _user(authorization)
+
+    over = LIMITER.start(user_id)
+    if over is not None:
+        log.info("usage limit: user=%s name=%s blocked for %ss", user_id, name, over["resetsInSeconds"])
+        return JSONResponse(
+            status_code=429,
+            headers={"Retry-After": str(over["resetsInSeconds"])},
+            content={"detail": f"You've reached your usage limit. Try again in {over['resetsInSeconds']} seconds.",
+                     "usage": over},
+        )
+
+    _tag_trace(user_id, name, session_id)
     try:
-        answer = AGENT.reply(req.message, _history(session_id))
+        answer, tokens = AGENT.reply_counted(req.message, _history(session_id))
     except Exception as exc:
         # Upstream errors can carry gateway URLs and provider payloads — log, do not return.
         log.exception("agent invocation failed", extra={"session_id": session_id})
         raise HTTPException(status_code=500, detail="agent invocation failed") from exc
 
+    usage = LIMITER.finish(user_id, tokens)
+    log.info("usage: user=%s name=%s tokens=%d requests=%d/%d tokens_total=%d/%d", user_id, name, tokens,
+             usage["requests"]["used"], usage["requests"]["limit"], usage["tokens"]["used"], usage["tokens"]["limit"])
     _remember(session_id, req.message, answer)
-    return ChatResponse(response=answer, session_id=session_id)
+    return ChatResponse(response=answer, session_id=session_id, usage=usage)

@@ -8,6 +8,7 @@ links and times are always exact.
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import re
@@ -17,6 +18,18 @@ from config import Config
 from search import RecipeStore
 
 log = logging.getLogger("recipe-chat.agent")
+
+# LLM tokens used by the request being handled (each request runs in its own context).
+_request_tokens: contextvars.ContextVar[list[int]] = contextvars.ContextVar("request_tokens")
+
+
+def _count(res):
+    """Adds a model or embedding response's reported token usage to the current request."""
+    total = getattr(getattr(res, "usage", None), "total_tokens", None)
+    bucket = _request_tokens.get(None)
+    if bucket is not None and total:
+        bucket[0] += total
+    return res
 
 OFF_TOPIC_REPLY = (
     "Sorry, I'm a recipe chatbot, so I can only help with cooking and recipes. "
@@ -91,6 +104,15 @@ class RecipeAgent:
         self.llm = config.llm_client()
         self.store = RecipeStore(config.qdrant_url, config.collection)
 
+    def reply_counted(self, message: str, history: list[dict]) -> tuple[str, int]:
+        """reply(), plus the LLM tokens it used."""
+        bucket = [0]
+        reset = _request_tokens.set(bucket)
+        try:
+            return self.reply(message, history), bucket[0]
+        finally:
+            _request_tokens.reset(reset)
+
     def reply(self, message: str, history: list[dict]) -> str:
         history = history[-2 * HISTORY_TURNS :]
         route = self._route(message, history)
@@ -121,24 +143,24 @@ class RecipeAgent:
     def _on_topic(self, message: str, query: str) -> bool:
         # The router's standalone query gives context to short follow-ups.
         text = message if query == message else f"{message}\n(In context: {query})"
-        res = self.llm.chat.completions.create(
+        res = _count(self.llm.chat.completions.create(
             model=self.config.chat_model,
             temperature=0,
             max_tokens=3,
             messages=[{"role": "system", "content": TOPIC_PROMPT}, {"role": "user", "content": text}],
-        )
+        ))
         answer = (res.choices[0].message.content or "").strip().lower()
         log.info("on topic: %s", answer)
         # Only an explicit yes counts: a small model sometimes rambles instead of answering.
         return answer.startswith("yes")
 
     def _route(self, message: str, history: list[dict]) -> dict:
-        res = self.llm.chat.completions.create(
+        res = _count(self.llm.chat.completions.create(
             model=self.config.chat_model,
             temperature=0,
             response_format={"type": "json_object"},
             messages=[{"role": "system", "content": ROUTER_PROMPT}, *history, {"role": "user", "content": message}],
-        )
+        ))
         try:
             route = json.loads(res.choices[0].message.content or "{}")
         except json.JSONDecodeError:
@@ -148,7 +170,7 @@ class RecipeAgent:
         return route if isinstance(route, dict) else {}
 
     def _embed(self, text: str) -> list[float]:
-        res = self.llm.embeddings.create(model=self.config.embed_model, input=[text])
+        res = _count(self.llm.embeddings.create(model=self.config.embed_model, input=[text]))
         return res.data[0].embedding
 
     def _answer(self, message: str, history: list[dict], recipes: list[dict]) -> str:
@@ -158,12 +180,12 @@ class RecipeAgent:
             for r in recipes
         ]
         system = ANSWER_PROMPT.format(recipes="\n".join(blocks))
-        res = self.llm.chat.completions.create(
+        res = _count(self.llm.chat.completions.create(
             model=self.config.chat_model,
             temperature=0.3,
             max_tokens=200,
             messages=[{"role": "system", "content": system}, *history, {"role": "user", "content": message}],
-        )
+        ))
         return prose((res.choices[0].message.content or "").strip())
 
 
