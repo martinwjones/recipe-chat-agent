@@ -29,8 +29,8 @@ class _Usage:
 
 class UsageLimiter:
     def __init__(self) -> None:
-        self.max_requests = int(os.environ.get("USER_REQUESTS_PER_MINUTE", "10"))
-        self.max_tokens = int(os.environ.get("USER_TOKENS_PER_MINUTE", "1000"))
+        self.max_requests = int(os.environ.get("USER_REQUESTS_PER_MINUTE", "20"))
+        self.max_tokens = int(os.environ.get("USER_TOKENS_PER_MINUTE", "5000"))
         self.penalty_seconds = int(os.environ.get("USER_LIMIT_PENALTY_SECONDS", "60"))
         self._users: dict[str, _Usage] = {}
         self._lock = threading.Lock()
